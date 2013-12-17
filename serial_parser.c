@@ -3,6 +3,7 @@
 #include <string.h>
 #include <inttypes.h>
 #include <unistd.h>
+#include <sys/wait.h>
 #include "serial_misc.h"
 #include "serial_status.h"
 #include "serial_parser.h"
@@ -59,7 +60,8 @@ int handler_notify(char *buffer) {
 
 int handler_sms_content(char *buffer) {
 	char *phone = NULL, *message = NULL;
-	char output[2048], *sender;
+	char sender[4096], *cmd, *temp, *argv;
+	int pipes[2], res;
 	
 	// grab phone origin
 	if(!(phone = at_cmgr_getphone(buffer)))
@@ -69,52 +71,48 @@ int handler_sms_content(char *buffer) {
 	if(!(message = at_cmgr_getmessage(buffer))) {
 		free(phone);
 		return 0;
-	}
+		
+	} else argv = message;
 	
 	printf("[+] replying to: <%s>\n", phone);
 	printf("[+] message    : <%s>\n", message);
 	
 	// deleting (all read) messages
-	writefd("AT+CMGD=0,1");
+	at_cmgd(0, 1);
 	
-	if(!strncasecmp(message, "ip address", 10)) {
-		sender = run("ip a | egrep 'UP|inet ' | awk '/:/ { printf \"%-5s \", $2 } /inet/ { print $2 }'");
-	
-	} else if(!strncasecmp(message, "uptime", 6)) {
-		sender = run("uptime");
-	
-	} else if(!strncasecmp(message, "uname", 5)) {
-		sender = run("uname -a");
-	
-	} else if(!strncasecmp(message, "privmsg", 7)) {
-		strncpy(message, " SMS >>", 7);
+	// building command name
+	if((temp = strchr(message, ' '))) {
+		cmd  = strndup(message, temp - message);
+		argv = temp + 1;
 		
-		if(!fork()) 
-			execl("/bin/bash", "/opt/scripts/irc-sender", "/opt/scripts/irc-sender", "#inpres", message + 1, NULL);
+	} else cmd = strdup(message);
+	
+	// starting external program to handle command
+	if(pipe(pipes) < 0)
+		diep("pipe");
+	
+	if(!fork()) {
+		dup2(pipes[1], STDOUT_FILENO);
+		close(pipes[0]);
+
+		execl("/bin/bash", "./sms-handler.sh", "./sms-handler.sh", cmd, argv, NULL);
 		
-		goto freestuff;
-	
-	} else if(!strncasecmp(message, "mpc", 3)) {
-		sender = run("mpc -h 192.168.10.210 | head -1");
+	} else {
+		close(pipes[1]);
 		
-	} else sender = strdup("Unknown command\n");
+		if((res = read(pipes[0], sender, sizeof(sender))) < 0)
+			diep("external output read");
+		
+		sender[res] = '\0';
+		wait(NULL);
+	}
 	
-	sprintf(output, "AT+CMGS=\"%s\"\r", phone);
-	writefdraw(output);
+	// sending reply
+	at_cmgs(phone, sender);
 	
-	printf("[+] --------------------------\n");
-	printf("%s", sender);
-	printf("[+] --------------------------\n");
-	
-	writefdraw(sender);
-	free(sender);
-	
-	// CTRL+Z
-	writefdraw("\x1A");
-	
-	freestuff:
-		free(phone);
-		free(message);
+	free(phone);
+	free(message);
+	free(cmd);
 	
 	return 1;
 }

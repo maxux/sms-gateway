@@ -72,3 +72,30 @@ char *at_cmgr_getmessage(char *buffer) {
 	
 	return strndup(temp + 1, right - temp - 1);
 }
+
+int at_cmgs(char *phone, char *message) {
+	char output[2048];
+	
+	sprintf(output, "AT+CMGS=\"%s\"\r", phone);
+	writefdraw(output);
+	
+	printf("[+] --------------------------\n");
+	printf("%s", message);
+	printf("[+] --------------------------\n");
+	
+	writefdraw(message);
+	
+	// CTRL+Z
+	writefdraw("\x1A");
+	
+	return 1;
+}
+
+int at_cmgd(int index, int mode) {
+	char buffer[256];
+	
+	zsnprintf(buffer, "AT+CMGD=%d,%d", index, mode);
+	writefd(buffer);
+	
+	return checkok();
+}

@@ -13,6 +13,9 @@
 	
 	extern modem_3g_t __device;
 	
+	void diep(char *str);
+	void dier(char *str);
+	
 	char *readfd(char *buffer, size_t length);
 	int writefdraw(char *message);
 	int writefd(char *message);
