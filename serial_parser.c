@@ -36,11 +36,15 @@ char *run(char *cmd) {
 
 int checkok() {
 	char buffer[512];
+	int value = 0;
 	
 	// loop while we got a status reply (we can process it later)
-	while(parse(readfd(buffer, sizeof(buffer))) == PARSE_STATUS);
+	while((value = parse(readfd(buffer, sizeof(buffer))))) {
+		if(value != PARSE_STATUS && value != PARSE_UNKNOWN)
+			return (parse(buffer) == PARSE_OK);
+	}
 	
-	return (parse(buffer) == PARSE_OK);
+	return 0;
 }
 
 
@@ -121,7 +125,7 @@ int parse(char *buffer) {
 	char temp[128];
 	
 	buffer = strcleaner(buffer);
-	// printf("[-] debug: <%s>\n", buffer);
+	printf("[-] debug: <%s>\n", buffer);
 	
 	//
 	// when successful message arrives
@@ -188,6 +192,10 @@ int parse(char *buffer) {
 		
 		return PARSE_STATUS;
 	}
+
+	if(!*buffer) {
+		return PARSE_UNKNOWN;
+	}
 	
 	//
 	// something else (error, echo, ...) arrives
@@ -204,5 +212,5 @@ int parse(char *buffer) {
 	
 	printf("[-] parser: unknown: <%s>\n", buffer);
 	
-	return 1;
+	return PARSE_UNKNOWN;
 }

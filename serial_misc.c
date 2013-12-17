@@ -8,6 +8,9 @@ char *strcleaner(char *buffer) {
 	while(*buffer && *buffer != '\n')
 		buffer++;
 	
+	while(*buffer && *buffer == '\n')
+		buffer++;
+
 	// trim the end of the line/block
 	length = strlen(buffer) - 1;
 	
@@ -16,7 +19,7 @@ char *strcleaner(char *buffer) {
 		length--;
 	}
 	
-	return ++buffer;
+	return buffer;
 }
 
 char *strduration(int value, char *output) {

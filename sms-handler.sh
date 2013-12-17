@@ -6,7 +6,7 @@ CMD=${1,,}
 # reading command
 case "$CMD" in
 	ip)
-		ip a | egrep 'UP|inet ' | awk '/:/ { printf "%s ", $2 } /inet/ { print $2 }'
+		ip a | egrep 'UP|inet ' | awk '/:/ { printf "%s ", $2 } /inet/ { print $2 }' 2>&1
 		;;
 	
 	uptime)
@@ -23,7 +23,7 @@ case "$CMD" in
 		;;
 	
 	mpc)
-		mpc -h 192.168.10.210 | head -1
+		mpc -h 192.168.10.210 | head -1 2>&1
 		;;
 	
 	cocu)
