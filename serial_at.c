@@ -1,3 +1,22 @@
+/* 
+ * Author: Daniel Maxime (maxux.unix@gmail.com)
+ * 
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ * 
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ * 
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston,
+ * MA 02110-1301, USA.
+ */
+ 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -9,6 +28,17 @@
 #include "serial.h"
 
 #define zsnprintf(x, ...) snprintf(x, sizeof(x), __VA_ARGS__)
+
+int at_single() {
+	at_commit();
+	writefd("AT");
+	return checkok();
+}
+
+int at_commit() {
+	writefdraw("\x1A");
+	return 0;
+}
 
 int at_cmgf(int mode) {
 	char buffer[256];
@@ -64,6 +94,8 @@ char *at_cmgr_getphone(char *buffer) {
 char *at_cmgr_getmessage(char *buffer) {
 	char *temp, *right;
 	
+	printf("<< %s >>\n", buffer);
+	
 	if(!(temp = strchr(buffer, '\n')))
 		return NULL;
 	
@@ -76,7 +108,7 @@ char *at_cmgr_getmessage(char *buffer) {
 int at_cmgs(char *phone, char *message) {
 	char output[2048];
 	
-	sprintf(output, "AT+CMGS=\"%s\"\r", phone);
+	sprintf(output, "AT+CMGS=\"%s\"\r\r\n", phone);
 	writefdraw(output);
 	
 	printf("[+] --------------------------\n");
@@ -86,7 +118,7 @@ int at_cmgs(char *phone, char *message) {
 	writefdraw(message);
 	
 	// CTRL+Z
-	writefdraw("\x1A");
+	at_commit();
 	
 	return 1;
 }

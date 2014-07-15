@@ -1,3 +1,22 @@
+/* 
+ * Author: Daniel Maxime (maxux.unix@gmail.com)
+ * 
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ * 
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ * 
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston,
+ * MA 02110-1301, USA.
+ */
+ 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -9,30 +28,10 @@
 #include "serial_parser.h"
 #include "serial_at.h"
 #include "serial.h"
+#include "pending.h"
+#include "pdu.h"
 
-char *run(char *cmd) {
-	FILE *pipe;
-	char *output, buffer[2048];
-	size_t length = 0;
-	
-	if(!(pipe = popen(cmd, "r")))
-		return NULL;
-	
-	output = (char *) calloc(1, sizeof(char));
-	
-	while(fgets(buffer, sizeof(buffer), pipe)) {
-		length += strlen(buffer) + 1;
-		output = (char *) realloc(output, length * sizeof(char));
-		
-		strcat(output, buffer);
-	}
-	
-	fclose(pipe);
-	
-	return output;
-}
-
-
+int csq_current = 0;
 
 int checkok() {
 	char buffer[512];
@@ -63,23 +62,23 @@ int handler_notify(char *buffer) {
 }
 
 int handler_sms_content(char *buffer) {
-	char *phone = NULL, *message = NULL;
+	char *phone, *pdu, *message, newread[1024];
 	char sender[4096], *cmd, *temp, *argv;
 	int pipes[2], res;
-	
-	// grab phone origin
-	if(!(phone = at_cmgr_getphone(buffer)))
-		return 0;
-	
+	(void) buffer;
+
 	// grab message
-	if(!(message = at_cmgr_getmessage(buffer))) {
-		free(phone);
+	// FIXME
+	readfd(newread, sizeof(newread));
+	pdu = strcleaner(strdup(newread));
+
+	if(!pdu_receive(pdu, &message, &phone)) {
+		fprintf(stderr, "[-] cannot decode sms pdu\n");
 		return 0;
-		
-	} else argv = message;
+	}
 	
-	printf("[+] replying to: <%s>\n", phone);
-	printf("[+] message    : <%s>\n", message);
+	argv = message;	
+	printf("[+] message from <%s>: <%s>\n", phone, message);
 	
 	// deleting (all read) messages
 	at_cmgd(0, 1);
@@ -99,20 +98,25 @@ int handler_sms_content(char *buffer) {
 		dup2(pipes[1], STDOUT_FILENO);
 		close(pipes[0]);
 
-		execl("/bin/bash", "./sms-handler.sh", "./sms-handler.sh", cmd, argv, NULL);
+		execl("/bin/bash", "./sms-handler.sh", "./sms-handler.sh", phone, cmd, argv, NULL);
 		
 	} else {
 		close(pipes[1]);
 		
-		if((res = read(pipes[0], sender, sizeof(sender))) < 0)
-			diep("external output read");
+		memset(sender, 0, sizeof(sender));
+
+		// FIXME
+		while((res = read(pipes[0], newread, sizeof(newread))) > 0) {
+			newread[res] = '\0';
+			strcat(sender, newread);
+		}
 		
-		sender[res] = '\0';
 		wait(NULL);
 	}
 	
 	// sending reply
-	at_cmgs(phone, sender);
+	// at_cmgs(phone, sender);
+	pdu_message(phone, sender);
 	
 	free(phone);
 	free(message);
@@ -125,7 +129,7 @@ int parse(char *buffer) {
 	char temp[128];
 	
 	buffer = strcleaner(buffer);
-	printf("[-] debug: <%s>\n", buffer);
+	// printf("[-] debug: <%s>\n", buffer);
 	
 	//
 	// when successful message arrives
@@ -178,6 +182,9 @@ int parse(char *buffer) {
 				(__device.link.rxtotal / 1024 / (double) 1024),
 				(__device.link.txtotal / 1024 / (double) 1024)
 			);
+			
+			// delayed pending
+			pending_check();
 		}
 		
 		// current changed
@@ -188,6 +195,13 @@ int parse(char *buffer) {
 		// any others repport not parsed
 		if(*buffer == '^') {
 			// TODO
+			if(!csq_current || (csq_current % 42) == 0) {
+				at_commit();
+				at_single();
+				at_csq();
+			}
+			
+			csq_current++;
 		}
 		
 		return PARSE_STATUS;

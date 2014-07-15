@@ -1,3 +1,22 @@
+/* 
+ * Author: Daniel Maxime (maxux.unix@gmail.com)
+ * 
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ * 
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ * 
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston,
+ * MA 02110-1301, USA.
+ */
+ 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -13,6 +32,11 @@
 #include "serial_parser.h"
 #include "serial_at.h"
 #include "serial.h"
+#include "database.h"
+#include "pending.h"
+#include "pdu.h"
+
+#define PDU_MODE
 
 modem_3g_t __device = {
 	.name = DEFAULT_DEVICE
@@ -40,7 +64,7 @@ int set_interface_attribs(int fd, int speed) {
 	
 	memset(&tty, 0, sizeof(tty));
 	
-	if(tcgetattr (fd, &tty) != 0)
+	if(tcgetattr(fd, &tty) != 0)
 		diep("tcgetattr");
 
 	cfsetospeed(&tty, speed);
@@ -48,8 +72,8 @@ int set_interface_attribs(int fd, int speed) {
 
 	tty.c_cflag = (tty.c_cflag & ~CSIZE) | CS8;
 	
-	tty.c_iflag &= ~IGNBRK;      // ignore break signal
-	tty.c_lflag  = 0;
+	tty.c_iflag &= ~IGNBRK | ~ICRNL;      // ignore break signal
+	tty.c_lflag  = ICANON;
 	tty.c_oflag  = 0;
 	tty.c_cc[VMIN]  = 1;
 	tty.c_cc[VTIME] = 10;
@@ -63,7 +87,7 @@ int set_interface_attribs(int fd, int speed) {
 	tty.c_cflag &= ~CSTOPB;
 	tty.c_cflag &= ~CRTSCTS;
 
-	if(tcsetattr (fd, TCSANOW, &tty) != 0)
+	if(tcsetattr(fd, TCSANOW, &tty) != 0)
 		diep("tcgetattr");
 	
 	return 0;
@@ -97,9 +121,13 @@ char *readfd(char *buffer, size_t length) {
 int writefdraw(char *message) {
 	int value;
 	size_t length = strlen(message);
+
+	printf("[+] << %s\n", message);
 	
 	if((value = write(__device.fd, message, length)) < 0)
 		diep(__device.name);
+	
+	usleep(10000);
 	
 	return value;
 }
@@ -115,13 +143,12 @@ int writefd(char *message) {
 	
 	// building message with CRCRLF on suffix
 	strcpy(temp, message);
-	strcat(temp, "\r\r\n");
+	strcat(temp, "\r\r\n\n");
 	
 	printf("[+] << %s\n", message);
 	
 	return writefdraw(temp);
 }
-
 
 int main(int argc, char *argv[]) {
 	char buffer[2048];
@@ -129,6 +156,9 @@ int main(int argc, char *argv[]) {
 	// setting device name from stdin if set
 	if(argc > 1)
 		__device.name = argv[1];
+	
+	printf("[+] init: opening database %s\n", SQL_DATABASE_FILE);
+	sqlite_db = db_sqlite_init();
 	
 	printf("[+] init: opening device %s\n", __device.name);
 
@@ -138,12 +168,17 @@ int main(int argc, char *argv[]) {
 	set_interface_attribs(__device.fd, DEFAULT_BAUDRATE);
 	
 	// setting text mode
+	#ifdef TEXT_MODE
 	if(!at_cmgf(1))
 		dier("init: cannot set text mode");
-		
+	#endif
+	#ifdef PDU_MODE
+	if(!at_cmgf(0))
+		dier("init: cannot set pdu mode");
+	#endif
 	
 	// setting storage
-	if(!at_cpms("ME", "Me", "ME"))
+	if(!at_cpms("ME", "ME", "ME"))
 		dier("init: cannot set storage mode");
 	
 	// setting notification mode
@@ -157,7 +192,9 @@ int main(int argc, char *argv[]) {
 	// infinite loop on messages
 	while(1) {
 		readfd(buffer, sizeof(buffer));
-		parse(buffer);
+		if(parse(buffer) == PARSE_STATUS) {
+			pending_check();
+		}
 	}
 	
 	return 0;
