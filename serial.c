@@ -28,6 +28,8 @@
 #include <termios.h>
 #include <inttypes.h>
 #include <errno.h>
+#include <sys/select.h>
+#include <sys/time.h>
 #include "serial_status.h"
 #include "serial_parser.h"
 #include "serial_at.h"
@@ -46,7 +48,7 @@ modem_3g_t __device = {
 // error handling
 //
 void diep(char *str) {
-	fprintf(stderr, "[-] %s: %s\n", str, strerror(errno));
+	fprintf(stderr, "[-] %s: [%d] %s\n", str, errno, strerror(errno));
 	exit(EXIT_FAILURE);
 }
 
@@ -60,24 +62,26 @@ void dier(char *str) {
 //
 int set_interface_attribs(int fd, int speed) {
 	struct termios tty;
-	int parity = 0;
 	
 	memset(&tty, 0, sizeof(tty));
 	
 	if(tcgetattr(fd, &tty) != 0)
 		diep("tcgetattr");
 
-	cfsetospeed(&tty, speed);
-	cfsetispeed(&tty, speed);
-
-	tty.c_cflag = (tty.c_cflag & ~CSIZE) | CS8;
+	// cfsetospeed(&tty, speed);
+	// cfsetispeed(&tty, speed);
 	
-	tty.c_iflag &= ~IGNBRK | ~ICRNL;      // ignore break signal
+	tty.c_cflag = speed | CRTSCTS | CS8 | CLOCAL | CREAD;
+
+	// tty.c_cflag = (tty.c_cflag & ~CSIZE) | CS8;
+	
+	tty.c_iflag  = IGNPAR | ICRNL;
 	tty.c_lflag  = ICANON;
 	tty.c_oflag  = 0;
 	tty.c_cc[VMIN]  = 1;
-	tty.c_cc[VTIME] = 10;
+	tty.c_cc[VTIME] = 0;
 
+/*
 	// shut off xon/xoff ctrl
 	tty.c_iflag &= ~(IXON | IXOFF | IXANY);
 
@@ -86,6 +90,7 @@ int set_interface_attribs(int fd, int speed) {
 	tty.c_cflag |= parity;
 	tty.c_cflag &= ~CSTOPB;
 	tty.c_cflag &= ~CRTSCTS;
+*/
 
 	if(tcsetattr(fd, TCSANOW, &tty) != 0)
 		diep("tcgetattr");
@@ -96,23 +101,52 @@ int set_interface_attribs(int fd, int speed) {
 //
 // device i/o
 //
-char *readfd(char *buffer, size_t length) {
+char *readfd(char *buffer, size_t length, int timeout) {
 	int res, saved = 0;
+	fd_set readfs;
+	int selval;
+	struct timeval tv, *ptv;
+	char *temp;
+	
+	FD_ZERO(&readfs);
 	
 	while(1) {
-		if((res = read(__device.fd, buffer + saved, length - saved)) < 0)
-			diep(__device.name);
-			
-		buffer[res + saved] = '\0';
+		FD_SET(__device.fd, &readfs);
 		
-		// line/block is maybe not completed, waiting for a full line/block
-		if(buffer[res + saved - 1] != '\n') {
-			saved = res;
+		tv.tv_sec  = 2;
+		tv.tv_usec = 0;
+		
+		ptv = (timeout) ? &tv : NULL;
+		
+		if((selval = select(__device.fd + 1, &readfs, NULL, NULL, ptv)) < 0)
+			diep("select");
+		
+		if(FD_ISSET(__device.fd, &readfs)) {		
+			if((res = read(__device.fd, buffer + saved, length - saved)) < 0)
+				diep(__device.name);
+				
+			buffer[res + saved] = '\0';
+			
+			// line/block is maybe not completed, waiting for a full line/block
+			if(buffer[res + saved - 1] != '\n' && *buffer != '>') {
+				saved = res;
+				continue;
+			}
+			
+			buffer[res + saved - 1] = '\0';
+			
+			for(temp = buffer; *temp == '\n'; temp++);
+			memmove(buffer, temp, strlen(temp));
+			
+			if(!*buffer)
+				continue;
+			
+			printf("[+] >> %s\n", buffer);
+			
+		} else {
+			pending_check();
 			continue;
-			
-		} else saved = 0;
-		
-		// printf("[+] >> %s\n", buffer);
+		}
 		
 		return buffer;
 	}
@@ -127,7 +161,7 @@ int writefdraw(char *message) {
 	if((value = write(__device.fd, message, length)) < 0)
 		diep(__device.name);
 	
-	usleep(10000);
+	usleep(50000);
 	
 	return value;
 }
@@ -136,16 +170,16 @@ int writefd(char *message) {
 	size_t length;
 	char *temp;
 	
-	length = strlen(message) + 3;
+	length = strlen(message) + 4;
 	
 	if(!(temp = (char *) malloc(sizeof(char) * length)))
 		diep("malloc");
 	
 	// building message with CRCRLF on suffix
 	strcpy(temp, message);
-	strcat(temp, "\r\r\n\n");
+	strcat(temp, "\r\r\n");
 	
-	printf("[+] << %s\n", message);
+	// printf("[+] << %s\n", message);
 	
 	return writefdraw(temp);
 }
@@ -162,10 +196,18 @@ int main(int argc, char *argv[]) {
 	
 	printf("[+] init: opening device %s\n", __device.name);
 
-	if((__device.fd = open(__device.name, O_RDWR | O_NOCTTY | O_SYNC)) < 0)
+	if((__device.fd = open(__device.name, O_RDWR | O_NOCTTY | O_NONBLOCK)) < 0)
 		diep(__device.name);
 
 	set_interface_attribs(__device.fd, DEFAULT_BAUDRATE);
+	
+	at_commit();
+
+	if(!at_echo(0))
+		dier("init: cannot disable echo");
+	
+	if(!at_curc(0))
+		dier("init: cannot disable current status");
 	
 	// setting text mode
 	#ifdef TEXT_MODE
@@ -191,10 +233,8 @@ int main(int argc, char *argv[]) {
 
 	// infinite loop on messages
 	while(1) {
-		readfd(buffer, sizeof(buffer));
-		if(parse(buffer) == PARSE_STATUS) {
-			pending_check();
-		}
+		readfd(buffer, sizeof(buffer), 1);
+		parse(buffer);
 	}
 	
 	return 0;

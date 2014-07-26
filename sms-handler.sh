@@ -3,6 +3,8 @@
 # command to lower
 CMD=${2,,}
 INTERFACES="voo ppp0 ppp1"
+AUTHORIZE="3249444XXXX"
+UNAUTHORIZE="Sorry, phone number '$1' is unauthorized to use this service"
 
 # reading command
 case "$CMD" in
@@ -40,11 +42,30 @@ case "$CMD" in
 		;;
 	
 	tweet)
-		if [ "$1" == "32494443466" ]; then
+		if [ "$1" == "$AUTHORIZE" ]; then
 			/opt/scripts/tweet-sender "#twitter_maxuxunix" "post $3"
-			echo "Tweet sent"
+			echo "(Twitter) tweet sent"
 		else
-			echo "Sorry, phone number '$1' is unauthorized to send tweet"
+			echo $UNAUTHORIZE
+		fi
+		;;
+	
+	reply)
+		if [ "$1" == "$AUTHORIZE" ]; then
+			/opt/scripts/tweet-sender "#twitter_maxuxunix" "reply $3"
+			echo "(Twitter) reply sent"
+		else
+			echo $UNAUTHORIZE
+		fi
+		;;
+
+	
+	irc)
+		if [ "$1" == "$AUTHORIZE" ]; then
+			/opt/scripts/privmsg-sender "#inpres" "$3"
+			echo "Message sent"
+		else
+			echo $UNAUTHORIZE
 		fi
 		;;
 

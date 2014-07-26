@@ -29,6 +29,24 @@
 #include "database.h"
 #include "pdu.h"
 
+int pending_add(char *number, char *message) {
+	char *sqlquery;
+	int value;
+	
+	sqlquery = sqlite3_mprintf(
+		"INSERT INTO pending (number, message, sent) "
+		"VALUES ('%q', '%q', 0)",
+		number, message
+	);
+	
+	if(!(value = db_sqlite_simple_query(sqlite_db, sqlquery)))
+		fprintf(stderr, "[-] cannot insert data\n");
+	
+	sqlite3_free(sqlquery);
+	
+	return value;
+}
+
 void pending_check() {
 	sqlite3_stmt *stmt;
 	char *sqlquery, sqlquery2[1024];
@@ -36,8 +54,7 @@ void pending_check() {
 	char *rnumber;
 	int id;
 	
-	sqlquery = "SELECT number, message, id FROM pending "
-	           "WHERE sent = 0                      ";
+	sqlquery = "SELECT number, message, id FROM pending WHERE sent = 0";
 	
 	if((stmt = db_sqlite_select_query(sqlite_db, sqlquery))) {
 		if(sqlite3_step(stmt) == SQLITE_ROW) {

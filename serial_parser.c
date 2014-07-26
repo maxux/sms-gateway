@@ -38,8 +38,8 @@ int checkok() {
 	int value = 0;
 	
 	// loop while we got a status reply (we can process it later)
-	while((value = parse(readfd(buffer, sizeof(buffer))))) {
-		if(value != PARSE_STATUS && value != PARSE_UNKNOWN)
+	while((value = parse(readfd(buffer, sizeof(buffer), 0)))) {
+		if(value != PARSE_EMPTY && value != PARSE_UNKNOWN)
 			return (parse(buffer) == PARSE_OK);
 	}
 	
@@ -69,7 +69,7 @@ int handler_sms_content(char *buffer) {
 
 	// grab message
 	// FIXME
-	readfd(newread, sizeof(newread));
+	readfd(newread, sizeof(newread), 0);
 	pdu = strcleaner(strdup(newread));
 
 	if(!pdu_receive(pdu, &message, &phone)) {
@@ -116,7 +116,8 @@ int handler_sms_content(char *buffer) {
 	
 	// sending reply
 	// at_cmgs(phone, sender);
-	pdu_message(phone, sender);
+	// pdu_message(phone, sender);
+	pending_add(phone, sender);
 	
 	free(phone);
 	free(message);
@@ -128,8 +129,12 @@ int handler_sms_content(char *buffer) {
 int parse(char *buffer) {
 	char temp[128];
 	
-	buffer = strcleaner(buffer);
+	// buffer = strcleaner(buffer);
 	// printf("[-] debug: <%s>\n", buffer);
+	if(!strcmp(buffer, "OK")) {
+		printf("[+] parser: ok from device\n");
+		return PARSE_OK;
+	}
 	
 	//
 	// when successful message arrives
@@ -153,6 +158,11 @@ int parse(char *buffer) {
 		if(!strncmp(buffer, "+CPMS:", 6)) {
 			printf("[+] parser: storage settings set\n");
 			return PARSE_OK;
+		}
+		
+		if(!strncmp(buffer, "+CMS ERROR:", 11)) {
+			printf("[+] parser: error code\n");
+			return PARSE_FAIL;
 		}
 		
 		
@@ -206,19 +216,10 @@ int parse(char *buffer) {
 		
 		return PARSE_STATUS;
 	}
-
-	if(!*buffer) {
-		return PARSE_UNKNOWN;
-	}
 	
 	//
 	// something else (error, echo, ...) arrives
-	//
-	if(!strcmp(buffer, "OK")) {
-		printf("[+] parser: ok from device\n");
-		return PARSE_OK;
-	}
-	
+	//	
 	if(!strncmp(buffer, "COMMAND NOT SUPPORT", 19)) {
 		fprintf(stderr, "[-] error: command not supported !\n");
 		return PARSE_FAIL;

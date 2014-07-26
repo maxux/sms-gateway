@@ -458,6 +458,10 @@ int pdu_message(char *number, char *message) {
 	writefdraw((char *) hexa);
 	at_commit();
 	
+	// double check
+	checkok();
+	checkok();
+	
 	return 0;
 }
 

@@ -131,3 +131,21 @@ int at_cmgd(int index, int mode) {
 	
 	return checkok();
 }
+
+int at_curc(int value) {
+	char buffer[256];
+	
+	zsnprintf(buffer, "AT^CURC=%d", value);
+	writefd(buffer);
+	
+	return checkok();
+}
+
+int at_echo(int value) {
+	char buffer[64];
+	
+	zsnprintf(buffer, "ATE%d", value);
+	writefd(buffer);
+	
+	return checkok();
+}
