@@ -19,6 +19,7 @@
  
 #include <stdio.h>
 #include <string.h>
+#include "serial_misc.h"
 
 char *strcleaner(char *buffer) {
 	size_t length;
@@ -46,4 +47,35 @@ char *strduration(int value, char *output) {
 	sprintf(output, "%02d:%02d:%02d", hrs, min, value);
 	
 	return output;
+}
+
+void dump(unsigned char *data, unsigned int len) {
+	unsigned int i, j;
+	
+	printf("[+] Data dump [%p -> %p] (%u bytes)\n", data, data + len, len);
+	printf("[ ] 0x0000: ");
+	
+	for(i = 0; i < len;) {
+		printf("0x%02x ", data[i++]);
+		
+		if(i % 16 == 0) {
+			printf("|");
+			
+			for(j = i - 16; j < i; j++)
+				printf("%c", ((isalnum(data[j]) ? data[j] : '.')));
+						
+			printf("|\n[ ] 0x%04x: ", i);
+		}
+	}
+	
+	if(i % 16) {
+		printf("%-*s", 5 * (16 - (i % 16)), " ");
+		
+		printf("|");
+		
+		for(j = i - (i % 16); j < len; j++)
+			printf("%c", ((isalnum(data[j]) ? data[j] : '.')));
+					
+		printf("%-*s|\n", 16 - (len % 16), " ");
+	}
 }

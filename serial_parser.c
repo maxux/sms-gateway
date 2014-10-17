@@ -32,6 +32,7 @@
 #include "pdu.h"
 
 int csq_current = 0;
+int x = 0;
 
 int checkok() {
 	char buffer[512];
@@ -40,7 +41,7 @@ int checkok() {
 	// loop while we got a status reply (we can process it later)
 	while((value = parse(readfd(buffer, sizeof(buffer), 0)))) {
 		if(value != PARSE_EMPTY && value != PARSE_UNKNOWN)
-			return (parse(buffer) == PARSE_OK);
+			return value;
 	}
 	
 	return 0;

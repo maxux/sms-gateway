@@ -6,31 +6,35 @@
 
 #include <time.h>
 
-#define CENTER_NUMBER       "32486000005"
+typedef struct multipart_t {
+	short id;
+	char total;
+	char current;
+	
+} multipart_t;
 
-enum { SMS_MAX_PDU_LENGTH  = 256 };
+typedef enum sms_type_t {
+	SMS_STANDARD = 0x00,
+	SMS_FLASH    = 0x01
+	
+} sms_type_t;
 
-/* 
- * Encode an SMS message. Output the encoded message into output pdu buffer.
- * Returns the length of the SMS encoded message in the output buffer or
- * a negative number in case encoding failed (for example provided output buffer
- * does not have enough space).
- */
-int pdu_encode(const char* service_center_number, const char* phone_number, const char* text,
-              unsigned int textlen, unsigned char* pdu, int pdu_size);
+typedef struct pdu_t {
+	char *destination;
+	unsigned char *message;
+	size_t message_size;
+	
+	char *buffer;
+	size_t buffer_size;
+	
+	multipart_t multipart;
+	sms_type_t type;
+	
+} pdu_t;
 
-/* 
- * Decode an SMS message. Output the decoded message into the sms text buffer.
- * Returns the length of the SMS dencoded message or a negative number in
- * case encoding failed (for example provided output buffer has not enough
- * space).
- */
-int pdu_decode(const unsigned char* pdu, int pdu_len,
-               time_t* sms_time,
-               char* phone_number, int phone_number_size,
-               char* text, int text_size);
+#define MULTIPART_CUT   130
 
-int pdu_message(char *number, char *message);
+int pdu_message(char *number, char *message, sms_type_t type);
 char *pdu_receive(char *data, char **message, char **phone);
 
 #endif   // SMS_SMS_H_

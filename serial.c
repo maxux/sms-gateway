@@ -209,6 +209,13 @@ int main(int argc, char *argv[]) {
 	if(!at_curc(0))
 		dier("init: cannot disable current status");
 	
+	//
+	// AT+CPIN
+	// CNMI MT 0 -> Poll reading
+	// PDU 0x19 UCS2
+	//
+	
+	
 	// setting text mode
 	#ifdef TEXT_MODE
 	if(!at_cmgf(1))

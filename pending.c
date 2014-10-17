@@ -52,22 +52,24 @@ void pending_check() {
 	char *sqlquery, sqlquery2[1024];
 	char *number = NULL, *message;
 	char *rnumber;
-	int id;
+	int id, type;
 	
-	sqlquery = "SELECT number, message, id FROM pending WHERE sent = 0";
+	sqlquery = "SELECT number, message, id, type "
+	           "FROM pending WHERE sent = 0";
 	
 	if((stmt = db_sqlite_select_query(sqlite_db, sqlquery))) {
 		if(sqlite3_step(stmt) == SQLITE_ROW) {
 			number  = (char *) sqlite3_column_text(stmt, 0);
 			message = (char *) sqlite3_column_text(stmt, 1);
 			id      = sqlite3_column_int(stmt, 2);
+			type    = sqlite3_column_int(stmt, 3);
 			
-			printf("[+] pending: %s: %s\n", number, message);
+			printf("[+] pending: [type: %d] <%s>: %s\n", type, number, message);
 			// at_cmgs(number, message);
 			
 			rnumber = (*number == '+') ? number + 1 : number;
 			
-			pdu_message(rnumber, message);
+			type = pdu_message(rnumber, message, type);
 		}
 	
 	} else fprintf(stderr, "[-] sqlite: cannot select pending\n");
@@ -75,7 +77,7 @@ void pending_check() {
 	sqlite3_finalize(stmt);
 	
 	if(number) {
-		sprintf(sqlquery2, "UPDATE pending SET sent = 1 WHERE id = %d", id);
+		sprintf(sqlquery2, "UPDATE pending SET sent = %d WHERE id = %d", type, id);
 		db_sqlite_simple_query(sqlite_db, sqlquery2);	
 	}
 }

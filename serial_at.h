@@ -10,6 +10,7 @@
 	int at_csq();
 	int at_cmgs(char *phone, char *message);
 	int at_cmgd(int index, int mode);
+	int at_curc(int value);
 	int at_echo(int value);
 	
 	char *at_cmgr_getphone(char *buffer);

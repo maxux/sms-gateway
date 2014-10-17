@@ -8,13 +8,19 @@
 #include "pdu.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <time.h>
 #include <stdint.h>
-#include <stdlib.h>
+#include <iconv.h>
+#include <math.h>
+#include "serial_parser.h"
 #include "serial_status.h"
+#include "serial_misc.h"
 #include "serial_at.h"
 #include "serial.h"
+
+short pduid = 1;
 
 enum {
 	BITMASK_7BITS = 0x7F,
@@ -27,6 +33,7 @@ enum {
 
 	SMS_DELIVER_ONE_MESSAGE = 0x04,
 	SMS_SUBMIT              = 0x11,
+	TP_UDHI                 = 0x40,
 
 	SMS_MAX_7BIT_TEXT_LENGTH  = 160,
 };
@@ -36,52 +43,6 @@ static unsigned char
 SwapDecimalNibble(const unsigned char x)
 {
 	return (x / 16) + ((x % 16) * 10);
-}
-
-// Encode/Decode PDU: Translate ASCII 7bit characters to 8bit buffer.
-// SMS encoding example from: http://www.dreamfabric.com/sms/.
-//
-// 7-bit ASCII: "hellohello"
-// [0]:h   [1]:e   [2]:l   [3]:l   [4]:o   [5]:h   [6]:e   [7]:l   [8]:l   [9]:o
-// 1101000 1100101 1101100 1101100 1101111 1101000 1100101 1101100 1101100 1101111
-//               |             |||           ||||| |               |||||||  ||||||
-// /-------------/   ///-------///     /////-///// \------------\  |||||||  \\\\\\ .
-// |                 |||               |||||                    |  |||||||   ||||||
-// input buffer position
-// 10000000 22111111 33322222 44443333 55555333 66666655 77777776 98888888 --999999
-// |                 |||               |||||                    |  |||||||   ||||||
-// 8bit encoded buffer
-// 11101000 00110010 10011011 11111101 01000110 10010111 11011001 11101100 00110111
-// E8       32       9B       FD       46       97       D9       EC       37
-
-
-// Encode PDU message by merging 7 bit ASCII characters into 8 bit octets.
-static int
-EncodePDUMessage(const char* sms_text, int sms_text_length, unsigned char* output_buffer, int buffer_size)
-{
-	// Check if output buffer is big enough.
-	if ((sms_text_length * 7 + 7) / 8 > buffer_size)
-		return -1;
-
-	int output_buffer_length = 0;
-	int carry_on_bits = 1;
-	int i = 0;
-
-	for (; i < sms_text_length - 1; ++i) {
-		output_buffer[output_buffer_length++] =
-			((sms_text[i] & BITMASK_7BITS) >> (carry_on_bits - 1)) |
-			((sms_text[i + 1] & BITMASK_7BITS) << (8 - carry_on_bits));
-		carry_on_bits++;
-		if (carry_on_bits == 8) {
-			carry_on_bits = 1;
-			++i;
-		}
-	}
-
-	if (i <= sms_text_length)
-		output_buffer[output_buffer_length++] = (sms_text[i] & BITMASK_7BITS) >> (carry_on_bits - 1);
-
-	return output_buffer_length;
 }
 
 // Decode PDU message by splitting 8 bit encoded buffer into 7 bit ASCII
@@ -118,7 +79,7 @@ DecodePDUMessage(const unsigned char* buffer, int buffer_length, char* output_sm
 
 // Encode a digit based phone number for SMS based format.
 static int
-EncodePhoneNumber(const char* phone_number, unsigned char* output_buffer, int buffer_size)
+EncodePhoneNumber(const char *phone_number, unsigned char *output_buffer, int buffer_size)
 {
 	int output_buffer_length = 0;  
 	const int phone_number_length = strlen(phone_number);
@@ -161,64 +122,85 @@ DecodePhoneNumber(const unsigned char* buffer, int phone_number_length, char* ou
 }
 			
 // Encode a SMS message to PDU
-int
-pdu_encode(const char* service_center_number, const char* phone_number, const char* sms_text,
-	   unsigned int text_length, unsigned char* output_buffer, int buffer_size)
-{       
-	if (buffer_size < 2)
-		return -1;
-
-	int output_buffer_length = 0;
-
-	// 1. Set SMS center number.
+int pdu_encode(pdu_t *pdu) {
+	int outlen = 0;
 	int length = 0;
-	if (service_center_number && strlen(service_center_number) > 0) {
-		output_buffer[1] = TYPE_OF_ADDRESS_INTERNATIONAL_PHONE;
-		length = EncodePhoneNumber(service_center_number,
-					   output_buffer + 2, buffer_size - 2);
-		if (length < 0 && length >= 254)
-			return -1;
-		length++;  // Add type of address.
-	}
-	output_buffer[0] = length;
-	output_buffer_length = length + 1;
-	if (output_buffer_length + 4 > buffer_size)
-		return -1;  // Check if it has space for four more bytes.
 
-	// 2. Set type of message.
-	output_buffer[output_buffer_length++] = SMS_SUBMIT;
-	output_buffer[output_buffer_length++] = 0x00;  // Message reference.
+	//
+	// Stage 1: Set SMS center number
+	//
+	
+	// Use CSCA, skipping this.
+	pdu->buffer[outlen++] = 0x00;
 
-	// 3. Set phone number.
-	output_buffer[output_buffer_length] = strlen(phone_number);
-	output_buffer[output_buffer_length + 1] = TYPE_OF_ADDRESS_INTERNATIONAL_PHONE;
-	length = EncodePhoneNumber(phone_number,
-				   output_buffer + output_buffer_length + 2,
-				   buffer_size - output_buffer_length - 2);
-	output_buffer_length += length + 2;
-	if (output_buffer_length + 4 > buffer_size)
-		return -1;  // Check if it has space for four more bytes.
+	//
+	// Stage 2: Set type of message
+	//
+	
+	// pdu->buffer[outlen++] = SMS_SUBMIT;
+	pdu->buffer[outlen++] = 0x41;
+	pdu->buffer[outlen++] = 0x00;  // Message reference.
+
+	//
+	// Stage 3: Set phone number
+	//
+	
+	pdu->buffer[outlen]     = strlen(pdu->destination);
+	pdu->buffer[outlen + 1] = TYPE_OF_ADDRESS_INTERNATIONAL_PHONE;
+	
+	length = EncodePhoneNumber(
+		pdu->destination,
+		(unsigned char *) pdu->buffer + outlen + 2,
+		pdu->buffer_size - outlen - 2
+	);
+	
+	outlen += length + 2;
 
 
-	// 4. Protocol identifiers.
-	output_buffer[output_buffer_length++] = 0x00;  // TP-PID: Protocol identifier.
-	output_buffer[output_buffer_length++] = 0x00;  // TP-DCS: Data coding scheme.
-	output_buffer[output_buffer_length++] = 0xB0;  // TP-VP: Validity: 10 days
+	//
+	// Stage 4: Protocol identifiers
+	// 
+	
+	pdu->buffer[outlen++] = 0x00; // TP-PID: Protocol identifier.
+	
+	// pdu->buffer[outlen++] = 0x00; // TP-DCS: Data coding scheme. (7-bits)
+	
+	pdu->buffer[outlen++] = (pdu->type == SMS_FLASH) ? 0x18 : 0x08;
+	// pdu->buffer[outlen++] = 0x18; // TP-DCS: Data coding scheme. (UCS2 + Flash)
+	// pdu->buffer[outlen++] = 0x08; // TP-DCS: Data coding scheme. (UCS2)
+	
+	// pdu->buffer[outlen++] = 0xB0; // TP-VP: Validity: 10 days
+	
+	pdu->buffer[outlen++] = pdu->message_size + 7;
+	// pdu->buffer[outlen++] = pdu->message_size + 6;
+	
+	// pdu->buffer[outlen++] = 0x05; // TP-UDHL: User Data Length
+	pdu->buffer[outlen++] = 0x06; // TP-UDHL: User Data Length
+	
+	// pdu->buffer[outlen++] = 0x00; // Concatenated SMS, 8-bit ref. num
+	pdu->buffer[outlen++] = 0x08; // Concatenated SMS, 16-bit ref. num
+	
+	pdu->buffer[outlen++] = 0x04; // Length of the header, excluding the first two fields
+	// pdu->buffer[outlen++] = 0x03; // Length of the header, excluding the first two fields
+	
+	pdu->buffer[outlen++] = pdu->multipart.id & 0xFF; // Unique ID
+	pdu->buffer[outlen++] = pdu->multipart.id >> 8;   // Unique ID
+	pdu->buffer[outlen++] = pdu->multipart.total;     // Total Part count
+	pdu->buffer[outlen++] = pdu->multipart.current;   // Current Part
 
-	// 5. SMS message.
-	// const int sms_text_length = strlen(sms_text);
-	const int sms_text_length = text_length;
-	if (sms_text_length > SMS_MAX_7BIT_TEXT_LENGTH)
-		return -1;
-	output_buffer[output_buffer_length++] = sms_text_length;
-	length = EncodePDUMessage(sms_text, sms_text_length,
-				  output_buffer + output_buffer_length, 
-				  buffer_size - output_buffer_length);
-	if (length < 0)
-		return -1;
-	output_buffer_length += length;
 
-	return output_buffer_length;
+	//
+	// Stage 5: SMS message
+	//
+	
+	// FIXME ?
+	if(*(pdu->message))
+		pdu->buffer[outlen++] = 0x00;
+	
+	memcpy(pdu->buffer + outlen, pdu->message, pdu->message_size - 1);
+	outlen += pdu->message_size - 1;
+
+	return outlen;
 }
 
 int pdu_decode(const unsigned char* buffer, int buffer_length,
@@ -296,54 +278,7 @@ static const unsigned int gsm7bits_extend_to_unicode[128] = {
     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
 };
 
-unsigned int utf8_decode(char *s, unsigned int *pi) {
-	unsigned int c;
-	int i = *pi;
-	/* one digit utf-8 */
-	if ((s[i] & 128)== 0 ) {
-		c = (unsigned int) s[i];
-		i += 1;
-	} else if ((s[i] & 224)== 192 ) { /* 110xxxxx & 111xxxxx == 110xxxxx */
-		c = (( (unsigned int) s[i] & 31 ) << 6) +
-			( (unsigned int) s[i+1] & 63 );
-		i += 2;
-	} else if ((s[i] & 240)== 224 ) { /* 1110xxxx & 1111xxxx == 1110xxxx */
-		c = ( ( (unsigned int) s[i] & 15 ) << 12 ) + 
-			( ( (unsigned int) s[i+1] & 63 ) << 6 ) +
-		 	( (unsigned int) s[i+2] & 63 );
-		i += 3;
-	} else if ((s[i] & 248)== 240 ) { /* 11110xxx & 11111xxx == 11110xxx */
-		c =  ( ( (unsigned int) s[i] & 7 ) << 18 ) +
-			( ( (unsigned int) s[i+1] & 63 ) << 12 ) +
-			( ( (unsigned int) s[i+2] & 63 ) << 6 ) +
-			( (unsigned int) s[i+3] & 63 );
-		i+= 4;
-	} else if ((s[i] & 252)== 248 ) { /* 111110xx & 111111xx == 111110xx */
-		c = ( ( (unsigned int) s[i] & 3 ) << 24 ) +
-			( ( (unsigned int) s[i+1] & 63 ) << 18 ) +
-			( ( (unsigned int) s[i+2] & 63 ) << 12 ) +
-			( ( (unsigned int) s[i+3] & 63 ) << 6 ) +
-			( (unsigned int) s[i+4] & 63 );
-		i += 5;
-	} else if ((s[i] & 254)== 252 ) { /* 1111110x & 1111111x == 1111110x */
-		c = ( ( (unsigned int) s[i] & 1 ) << 30 ) + 
-			( ( (unsigned int) s[i+1] & 63 ) << 24 ) +
-			( ( (unsigned int) s[i+2] & 63 ) << 18 ) +
-			( ( (unsigned int) s[i+3] & 63 ) << 12 ) +
-			( ( (unsigned int) s[i+4] & 63 ) << 6 ) +
-			( (unsigned int) s[i+5] & 63 );
-		i += 6;
-	} else {
-		c = '?';
-		i++;
-	}
-	*pi = i;
-	return c;
-}
-
-static void
-utf8_build( unsigned int value, unsigned char out[6], int in_pos, int out_pos )
-{
+static void utf8_build( unsigned int value, unsigned char out[6], int in_pos, int out_pos ) {
 	unsigned int in_mask, out_mask;
 	int byte = 0;
 	while ( in_pos < 32 ) {
@@ -359,7 +294,7 @@ utf8_build( unsigned int value, unsigned char out[6], int in_pos, int out_pos )
 	}
 }
 
-int utf8_encode(unsigned int value, unsigned char out[6]) {
+static int utf8_encode(unsigned int value, unsigned char out[6]) {
 	int i;
 	for ( i=1; i<6; ++i ) out[i] = 0x80;  /* 10xxxxxx */
 	if ( value < 0x80 ) {
@@ -408,61 +343,112 @@ inline short utf8_charlen(unsigned char c) {
 	return 0; /* invalid utf-8 */
 }
 
-unsigned int textconvert(char *message, char *out) {
-	unsigned int lng = strlen(message);
-	unsigned int i, j, current, increment, real;
+size_t utf_to_ucs(char *input, char *output, size_t outlen) {
+	iconv_t ic;
+	char *ichar = "UTF-8";
+	char *ochar = "UCS2";
+	size_t inlen = strlen(input);
+	size_t outed = outlen;
 	
-	for(i = 0, real = 0; i < lng; real++) {
-		increment = 0;
-		current = utf8_decode(message + i, &increment);
-		
-		// printf("Increment: %d, convert: %03d ", increment, current);
-		
-		for(j = 0; j < 128; j++) {
-			if(gsm7bits_to_unicode[j] == current) {
-				out[real] = j;
-				break;
-			}
-		}
-		
-		if(j == 128) {
-			printf("[-] warning: unknown charactere %d\n", current);
-			out[real] = '?';
-		}
-		
-		i += increment;
-
-		if(real > 120)
-			return real;
+	printf("[+] iconv: converting from <%s> to <%s>...\n", ichar, ochar);
+	
+	// Opening iconv handler
+	if((ic = iconv_open(ochar, ichar)) == (iconv_t) -1) {
+		perror("[-] iconv_open");
+		return 0;
 	}
 	
-	return real;
+	if(iconv(ic, &input, &inlen, &output, &outlen) == (size_t) -1) {
+		perror("[-] iconv");
+		return 0;
+	}
+	
+	iconv_close(ic);
+	
+	return outed - outlen;
 }
 
-int pdu_message(char *number, char *message) {
+int pdu_message(char *number, char *message, sms_type_t type) {
+	pdu_t pdu;
 	char buffer[1024];
-	unsigned char pdu[2048], hexa[4096];
-	unsigned int i, length, real, write, skip;
+	unsigned char data[2048], hexa[4096];
+	unsigned int i, length, write, skip;
+	size_t real, current, size;
+	int totalpart = 1, parser;
 	
-	real = textconvert(message, buffer);
-	length = pdu_encode(CENTER_NUMBER, number, buffer, real, pdu, sizeof(buffer));
+	// real = textconvert(message, buffer);	
+	if(!(real = utf_to_ucs(message, (char *) buffer, sizeof(buffer)))) {
+		fprintf(stderr, "[-] cannot convert message !\n");
+		
+		// fallback
+		strcpy((char *) buffer, "[parsing failed]");
+		real = 16;
+	}
 	
-	for(i = 0, write = 0; i < length; i++)
-		write += sprintf((char *) hexa + write, "%02X", pdu[i]);
+	totalpart = (int) ceil(real / 130.0);
 	
-	skip = ((int) *pdu) + 1;
+	// setting multi-part settings
+	pdu.multipart.id      = time(NULL) % 255;
+	pdu.multipart.total   = totalpart;
+	pdu.multipart.current = 1;
 	
-	sprintf(buffer, "AT+CMGS=%d\r", length - skip);
-	writefdraw(buffer);
+	// setting destination
+	pdu.destination  = number;
 	
-	writefdraw((char *) hexa);
-	at_commit();
+	// setting output buffer and type
+	pdu.buffer       = (char *) data;
+	pdu.buffer_size  = sizeof(data);
+	pdu.type         = type;
 	
-	// double check
-	checkok();
-	checkok();
+	// message float window
+	current = 0;
+	size    = (real <= MULTIPART_CUT) ? real : MULTIPART_CUT;
 	
-	return 0;
+	// handling multi-part sending
+	while(pdu.multipart.current <= pdu.multipart.total) {
+		// verbose data
+		printf(
+			"[+] pdu: id: %u, total: %d, this part: %d\n",
+			pdu.multipart.id,
+			pdu.multipart.total,
+			pdu.multipart.current
+		);
+		
+		pdu.message      = (unsigned char *) buffer + current;
+		pdu.message_size = size;
+		
+		// verbose data
+		printf("[+] pdu: message to <%s>\n", pdu.destination);
+		dump(pdu.message, pdu.message_size);
+		
+		length = pdu_encode(&pdu);
+		
+		for(i = 0, write = 0; i < length; i++)
+			write += sprintf((char *) hexa + write, "%02X", data[i]);
+		
+		skip = ((int) *data) + 1;
+		
+		sprintf(buffer, "AT+CMGS=%d\r", length - skip);
+		writefdraw(buffer);
+		
+		writefdraw((char *) hexa);
+		at_commit();
+		
+		// double check
+		if((parser = checkok()) == PARSE_FAIL) {
+			printf("[-] sending failed\n");
+			return -1;
+		}
+		
+		checkok();
+		
+		// next part
+		current += size;
+		size     = (real - current > MULTIPART_CUT) ? MULTIPART_CUT : real - current;
+		pdu.multipart.current++;
+	}
+	
+	return 1;
 }
 
 char *pdu_receive(char *data, char **message, char **phone) {
