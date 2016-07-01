@@ -27,3 +27,8 @@ Create an empty database to default location:
 
 From root directory, launch the gateway. It will use `/dev/ttyUSB2` by default. Path can be specified as first argument.
 `./src/sms-gateway [tty-path]`
+
+
+# Tested hardware
+Currently tested on:
+- `12d1:1001 Huawei Technologies Co., Ltd. E169/E620/E800 HSDPA Modem`
