@@ -28,8 +28,8 @@
 #include "serial_parser.h"
 #include "serial_at.h"
 #include "serial.h"
-#include "pending.h"
 #include "pdu.h"
+#include "pending.h"
 
 int csq_current = 0;
 int x = 0;
@@ -62,67 +62,57 @@ int handler_notify(char *buffer) {
 	return 1;
 }
 
+int handler_inbox(char *buffer) {
+	char newread[1024], *pdu;
+	int index;
+	(void) buffer;
+	
+	// read pdu, but ignore it and request to read the message
+	readfd(newread, sizeof(newread), 0);
+	pdu = strcleaner(strdup(newread));
+	
+	printf("[+] saving raw pdu\n");
+	pdu_add(pdu);
+	
+	// jump to message id directly
+	index = atoi(buffer + 7);
+	printf("[+] message id: %d\n", index);
+	
+	// request to read that message
+	snprintf(newread, sizeof(newread), "AT+CMGR=%d", index);
+	writefd(newread);
+	
+	return 1;
+}
+
 int handler_sms_content(char *buffer) {
-	char *phone, *pdu, *message, newread[1024];
-	char sender[4096], *cmd, *temp, *argv;
-	int pipes[2], res;
+	char *pdu, newread[1024];
+	pdu_t *data;
 	(void) buffer;
 
 	// grab message
 	// FIXME
 	readfd(newread, sizeof(newread), 0);
 	pdu = strcleaner(strdup(newread));
+	
+	printf("[+] saving raw pdu\n");
+	pdu_add(pdu);
 
-	if(!pdu_receive(pdu, &message, &phone)) {
+	if(!(data = pdu_receive(pdu))) {
 		fprintf(stderr, "[-] cannot decode sms pdu\n");
+		failed_add(pdu);
 		return 0;
 	}
 	
-	argv = message;	
-	printf("[+] message from <%s>: <%s>\n", phone, message);
+	printf("[+] message from <%s>: <%s>\n", data->number, data->message);
+	
+	segment_add(data);
+	
+	// FIXME: free ...
+	free(data);
 	
 	// deleting (all read) messages
 	at_cmgd(0, 1);
-	
-	// building command name
-	if((temp = strchr(message, ' '))) {
-		cmd  = strndup(message, temp - message);
-		argv = temp + 1;
-		
-	} else cmd = strdup(message);
-	
-	// starting external program to handle command
-	if(pipe(pipes) < 0)
-		diep("pipe");
-	
-	if(!fork()) {
-		dup2(pipes[1], STDOUT_FILENO);
-		close(pipes[0]);
-
-		execl("/bin/bash", "./sms-handler.sh", "./sms-handler.sh", phone, cmd, argv, NULL);
-		
-	} else {
-		close(pipes[1]);
-		
-		memset(sender, 0, sizeof(sender));
-
-		// FIXME
-		while((res = read(pipes[0], newread, sizeof(newread))) > 0) {
-			newread[res] = '\0';
-			strcat(sender, newread);
-		}
-		
-		wait(NULL);
-	}
-	
-	// sending reply
-	// at_cmgs(phone, sender);
-	// pdu_message(phone, sender);
-	pending_add(phone, sender);
-	
-	free(phone);
-	free(message);
-	free(cmd);
 	
 	return 1;
 }
@@ -140,7 +130,7 @@ int parse(char *buffer) {
 	//
 	// when successful message arrives
 	//
-	if(*buffer == '+') {		
+	if(*buffer == '+') {
 		if(!strncmp(buffer, "+CMTI:", 6)) {
 			printf("[+] parser: we got a new message\n");
 			return handler_notify(buffer);
@@ -160,6 +150,12 @@ int parse(char *buffer) {
 			printf("[+] parser: storage settings set\n");
 			return PARSE_OK;
 		}
+		
+		if(!strncmp(buffer, "+CMGL:", 6)) {
+			printf("[+] parser: message from memory request\n");
+			return handler_inbox(buffer);
+		}
+		
 		
 		if(!strncmp(buffer, "+CMS ERROR:", 11)) {
 			printf("[+] parser: error code\n");

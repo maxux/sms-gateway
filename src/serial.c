@@ -35,8 +35,8 @@
 #include "serial_at.h"
 #include "serial.h"
 #include "database.h"
-#include "pending.h"
 #include "pdu.h"
+#include "pending.h"
 
 #define PDU_MODE
 
@@ -145,6 +145,7 @@ char *readfd(char *buffer, size_t length, int timeout) {
 			
 		} else {
 			pending_check();
+			unread_check();
 			continue;
 		}
 		
@@ -184,6 +185,39 @@ int writefd(char *message) {
 	return writefdraw(temp);
 }
 
+/*
+void debug() {
+	sqlite3_stmt *stmt;
+	char *sqlquery;
+	char *pdu;
+	pdu_t *data;
+	
+	sqlquery = "SELECT pdu FROM raw ORDER BY id";
+	
+	if(!(stmt = db_sqlite_select_query(sqlite_db, sqlquery))) {
+		fprintf(stderr, "[-] sqlite: cannot select pending\n");
+		exit(EXIT_FAILURE);
+	}
+		
+	while(sqlite3_step(stmt) == SQLITE_ROW) {
+		pdu = (char *) sqlite3_column_text(stmt, 0);
+		printf("-> %s\n", pdu);
+		
+		if(!(data = pdu_receive(pdu))) {
+			printf("PDU FAILED\n");
+			continue;
+		}
+		
+		// segment_add(data);
+		printf("%s >> %s\n", data->number, data->message);
+	}
+
+	sqlite3_finalize(stmt);
+	
+	exit(EXIT_SUCCESS);
+}
+*/
+
 int main(int argc, char *argv[]) {
 	char buffer[2048];
 	
@@ -193,6 +227,8 @@ int main(int argc, char *argv[]) {
 	
 	printf("[+] init: opening database %s\n", SQL_DATABASE_FILE);
 	sqlite_db = db_sqlite_init();
+	
+	// debug();
 	
 	printf("[+] init: opening device %s\n", __device.name);
 
@@ -233,7 +269,6 @@ int main(int argc, char *argv[]) {
 	// setting notification mode
 	if(!at_cnmi(1, 1, 0, 2, 1))
 		dier("init: cannot set notification mode");
-		
 	
 	// request signal quality
 	at_csq();

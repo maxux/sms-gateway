@@ -72,6 +72,14 @@ int at_csq() {
 	return 1;
 }
 
+int at_cmgl(char *mode) {
+	char buffer[256];
+	
+	zsnprintf(buffer, "AT+CMGL=%s", mode);
+	writefd(buffer);
+	
+	return 1;
+}
 
 char *at_cmgr_getphone(char *buffer) {
 	char *temp, *right, *output;

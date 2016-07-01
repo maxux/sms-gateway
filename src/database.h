@@ -3,7 +3,7 @@
 
 	#include <sqlite3.h>
 	
-	#define SQL_DATABASE_FILE    "/tmp/ramdisk/pending.sqlite3"
+	#define SQL_DATABASE_FILE    "db/pending.sqlite3"
 	
 	extern sqlite3 *sqlite_db;
 	
