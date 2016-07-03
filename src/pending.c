@@ -79,6 +79,66 @@ int pending_commit(int id, int status) {
 	return value;
 }
 
+int segment_concat(pdu_t *pdu) {
+	sqlite3_stmt *stmt;
+	char *sqlquery;
+	char *segment;
+	char message[16384];
+	int value;
+	
+	sqlquery = sqlite3_mprintf(
+		"SELECT message FROM segments "
+		"WHERE number = '%s' AND partid = %d AND total = %d "
+		"ORDER BY part ASC",
+		pdu->number, pdu->multipart.id, pdu->multipart.total
+	);
+	
+	memset(message, '\0', sizeof(message));
+	
+	if((stmt = db_sqlite_select_query(sqlite_db, sqlquery))) {
+		while(sqlite3_step(stmt) == SQLITE_ROW) {
+			segment = (char *) sqlite3_column_text(stmt, 0);
+			strcat(message, segment);
+		}
+	
+	} else fprintf(stderr, "[-] sqlite: cannot select segments\n");
+
+	sqlite3_finalize(stmt);
+	sqlite3_free(sqlquery);
+	
+	// insert stuff
+	sqlquery = sqlite3_mprintf(
+		"INSERT INTO messages (number, message, received, read) "
+		"VALUES ('%s', '%q', datetime('now'), 0)",
+		pdu->number, message
+	);
+	
+	if(!(value = db_sqlite_simple_query(sqlite_db, sqlquery)))
+		fprintf(stderr, "[-] cannot insert data\n");
+	
+	sqlite3_free(sqlquery);
+	
+	return value;
+}
+
+int segment_finalize(pdu_t *pdu) {
+	char *sqlquery;
+	int value;
+
+	sqlquery = sqlite3_mprintf(
+		"INSERT INTO messages (number, message, received, read) "
+		"VALUES ('%s', '%q', datetime('now'), 0)",
+		pdu->number, pdu->message
+	);
+	
+	if(!(value = db_sqlite_simple_query(sqlite_db, sqlquery)))
+		fprintf(stderr, "[-] cannot insert data\n");
+	
+	sqlite3_free(sqlquery);
+	
+	return value;
+}
+
 int segment_add(pdu_t *pdu) {
 	char *sqlquery;
 	int value;
@@ -94,6 +154,15 @@ int segment_add(pdu_t *pdu) {
 		fprintf(stderr, "[-] cannot insert data\n");
 	
 	sqlite3_free(sqlquery);
+	
+	// single message, saving it to message directly
+	if(pdu->multipart.total == 1)
+		return segment_finalize(pdu);
+	
+	// last message from multi-part
+	// insert complete message on message table
+	if(pdu->multipart.current == pdu->multipart.total)
+		return segment_concat(pdu);
 	
 	return value;
 }
