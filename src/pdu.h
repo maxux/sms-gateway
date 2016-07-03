@@ -27,6 +27,7 @@
 		
 		multipart_t multipart;
 		sms_type_t type;
+		int charset;
 		
 	} pdu_t;
 

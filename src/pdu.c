@@ -249,8 +249,15 @@ pdu_t *pdu_decode(const unsigned char *buffer, int buffer_length, pdu_t *message
 
 	const int sms_pid_start = sms_deliver_start + 3 + (buffer[sms_deliver_start + 1] + 1) / 2;
 	
+	message->charset = buffer[sms_pid_start + 1];
 	printf("[+] pdu: protocol id: 0x%02x\n", buffer[sms_pid_start]);
-	printf("[+] pdu: data coding: 0x%02x\n", buffer[sms_pid_start + 1]);
+	printf("[+] pdu: data coding: 0x%02x", message->charset);
+	
+	if(message->charset == 0x00)
+		printf(" -> Default alphabet\n");
+	
+	if(message->charset == 0x08)
+		printf(" -> UCS-2\n");
 
 	//
 	// timestamp
@@ -304,14 +311,28 @@ pdu_t *pdu_decode(const unsigned char *buffer, int buffer_length, pdu_t *message
 	//
 	// payload decoding
 	//
-	message->message = malloc(sizeof(char) * message->message_size * 2);
+	unsigned int decoded_sms_text_size;
+	message->message = calloc(sizeof(char), message->message_size * 2);
 	
-	const unsigned int decoded_sms_text_size = DecodePDUMessage(
-		buffer + sms_start + 1,
-		buffer_length - (sms_start + 1),
-		message->message,
-		message->message_size
-	);
+	if(message->charset == 0x00) {
+		printf("[+] decoding default alpabet pdu message\n");
+		
+		decoded_sms_text_size = DecodePDUMessage(
+			buffer + sms_start + 1,
+			buffer_length - (sms_start + 1),
+			message->message,
+			message->message_size
+		);
+
+	} else if(message->charset == 0x08) {
+		printf("[+] copying ucs-2 pdu message (%d bytes)\n", buffer_length - (sms_start + 1));
+		memcpy(message->message, buffer + sms_start + 1, buffer_length - (sms_start + 1));
+		decoded_sms_text_size = buffer_length - (sms_start + 1);
+		
+	} else {
+		printf("[-] charset 0x%02x unsupported\n", message->charset);
+		return NULL;
+	}
 
 	if(decoded_sms_text_size != message->message_size)
 		return NULL;
@@ -321,9 +342,20 @@ pdu_t *pdu_decode(const unsigned char *buffer, int buffer_length, pdu_t *message
 	//
 	if(udh_length > 0) {
 		int skip_char = ceil(((udh_length + 1) * 8) / 7.0);
+		printf("[+] cleaning udh header (%d bytes)\n", skip_char);
 		
 		memmove(message->message, message->message + skip_char, message->message_size - skip_char);
 		message->message_size -= skip_char;
+	}
+	
+	//
+	// fix incomplete multibytes for ucs-2
+	//
+	if(message->charset == 0x08) {
+		if(message->message_size % 2) {
+			message->message[message->message_size] = '\0';
+			message->message_size += 1;
+		}
 	}
 
 	return message;
@@ -416,11 +448,8 @@ inline short utf8_charlen(unsigned char c) {
 	return 0; /* invalid utf-8 */
 }
 
-size_t utf_to_ucs(char *input, char *output, size_t outlen) {
+size_t convert(char *input, size_t inlen, char *output, size_t outlen, char *ichar, char *ochar) {
 	iconv_t ic;
-	char *ichar = "UTF-8";
-	char *ochar = "UCS2";
-	size_t inlen = strlen(input);
 	size_t outed = outlen;
 	
 	printf("[+] iconv: converting from <%s> to <%s>...\n", ichar, ochar);
@@ -450,7 +479,7 @@ int pdu_message(char *number, char *message, sms_type_t type) {
 	int totalpart = 1, parser;
 	
 	// real = textconvert(message, buffer);	
-	if(!(real = utf_to_ucs(message, (char *) buffer, sizeof(buffer)))) {
+	if(!(real = convert(message, strlen(message), (char *) buffer, sizeof(buffer), "UTF-8", "UCS2"))) {
 		fprintf(stderr, "[-] cannot convert message !\n");
 		
 		// fallback
@@ -555,19 +584,28 @@ pdu_t *pdu_receive(char *data) {
 	//
 	// charset convertion
 	//
-	
-	k = 0; // readable index
-	
-	// converting gsm7 octets to utf-8
-	for(i = 0; i < output->message_size; i++) {
-		charlen = utf8_encode(gsm7bits_to_unicode[output->message[i]], (unsigned char *) temp);
+	if(output->charset == 0x00) {
+		k = 0; // readable index
 		
-		for(j = 0; j < charlen; j++)
-			readable[k++] = temp[j];
+		// converting gsm7 octets to utf-8
+		for(i = 0; i < output->message_size; i++) {
+			charlen = utf8_encode(gsm7bits_to_unicode[output->message[i]], (unsigned char *) temp);
+			
+			for(j = 0; j < charlen; j++)
+				readable[k++] = temp[j];
+		}
+		
+		// end of readable string
+		readable[k] = '\0';
+
+	} else if(output->charset == 0x08) {
+		printf("[+] converting ucs-2 message\n");
+		memset(readable, '\0', sizeof(readable)); // reset previous messages
+		charlen = convert(output->message, output->message_size, readable, sizeof(readable), "UCS2", "UTF-8");
+		
+	} else {
+		// should not happen, unsupported detected during pdu_decode
 	}
-	
-	// end of readable string
-	readable[k] = '\0';
 	
 	free(output->message);
 	output->message = strdup(readable);
