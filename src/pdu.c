@@ -346,6 +346,15 @@ pdu_t *pdu_decode(const unsigned char *buffer, int buffer_length, pdu_t *message
 		
 		memmove(message->message, message->message + skip_char, message->message_size - skip_char);
 		message->message_size -= skip_char;
+
+	} else {
+		printf("[+] no udh, checking message\n");
+		
+		if(message->message[0] == '\0') {
+			printf("[+] fixing message\n");
+			memmove(message->message, message->message + 1, message->message_size - 1);
+			message->message_size -= 1;
+		}
 	}
 	
 	//
@@ -600,6 +609,8 @@ pdu_t *pdu_receive(char *data) {
 
 	} else if(output->charset == 0x08) {
 		printf("[+] converting ucs-2 message\n");
+		dump((unsigned char *) output->message, output->message_size);
+		
 		memset(readable, '\0', sizeof(readable)); // reset previous messages
 		charlen = convert(output->message, output->message_size, readable, sizeof(readable), "UCS2", "UTF-8");
 		

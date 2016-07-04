@@ -30,6 +30,7 @@
 #include <errno.h>
 #include <sys/select.h>
 #include <sys/time.h>
+#include <getopt.h>
 #include "serial_status.h"
 #include "serial_parser.h"
 #include "serial_at.h"
@@ -37,6 +38,14 @@
 #include "database.h"
 #include "pdu.h"
 #include "pending.h"
+
+static struct option long_options[] = {
+	{"raw",    required_argument, 0, 'r'},
+	{"device", required_argument, 0, 'd'},
+	{"replay", no_argument,       0, 'p'},
+	{"help",   no_argument,       0, 'h'},
+	{0, 0, 0, 0}
+};
 
 #define PDU_MODE
 
@@ -185,14 +194,13 @@ int writefd(char *message) {
 	return writefdraw(temp);
 }
 
-/*
-void debug() {
+int pdebug(int id, int replay) {
 	sqlite3_stmt *stmt;
 	char *sqlquery;
 	char *pdu;
 	pdu_t *data;
 	
-	sqlquery = "SELECT pdu FROM raw ORDER BY id";
+	sqlquery = sqlite3_mprintf("SELECT pdu FROM raw WHERE id = %d", id);
 	
 	if(!(stmt = db_sqlite_select_query(sqlite_db, sqlquery))) {
 		fprintf(stderr, "[-] sqlite: cannot select pending\n");
@@ -205,30 +213,44 @@ void debug() {
 		
 		if(!(data = pdu_receive(pdu))) {
 			printf("PDU FAILED\n");
-			continue;
+			return 1;
 		}
 		
-		// segment_add(data);
 		printf("%s >> %s\n", data->number, data->message);
+		
+		if(replay)
+			segment_add(data);
 	}
 
+	sqlite3_free(sqlquery);
 	sqlite3_finalize(stmt);
 	
-	exit(EXIT_SUCCESS);
+	return 0;
 }
-*/
 
-int main(int argc, char *argv[]) {
-	char buffer[2048];
+void print_usage(char *app) {
+	(void) app;
 	
-	// setting device name from stdin if set
-	if(argc > 1)
-		__device.name = argv[1];
+	printf("serialinfo command line\n\n");
+	
+	printf(" --raw <pdu-raw-id>   only decode pdu raw-id from database\n");
+	printf(" --replay             replay database save when used with --raw\n");
+	printf(" --device <device>    serial device path\n");
+	printf(" --help               print this message\n");
+	
+	exit(EXIT_FAILURE);
+}
+
+void init(char *device, int debug) {
+	__device.name = device;
 	
 	printf("[+] init: opening database %s\n", SQL_DATABASE_FILE);
 	sqlite_db = db_sqlite_init();
 	
-	// debug();
+	if(debug) {
+		printf("[+] entering debug mode\n");
+		return;
+	}
 	
 	printf("[+] init: opening device %s\n", __device.name);
 
@@ -272,6 +294,49 @@ int main(int argc, char *argv[]) {
 	
 	// request signal quality
 	at_csq();
+}
+
+int main(int argc, char *argv[]) {
+	char buffer[2048];
+	char *device = DEFAULT_DEVICE;
+	int pdu = 0, replay = 0;
+	int i, option_index = 0;
+
+	while(1) {
+		i = getopt_long(argc, argv, "r:d:ph", long_options, &option_index);
+
+		if(i == -1)
+			break;
+
+		switch(i) {
+			case 'r':
+				pdu = atoi(optarg);
+				break;
+				
+			case 'd':
+				device = strdup(optarg);
+				break;
+				
+			case 'p':
+				replay = 1;
+				break;
+			
+			case 'h':
+			case '?':
+				print_usage(argv[0]);
+				return 1;
+			break;
+
+			default:
+				abort();
+		}
+	}
+	
+	init(device, pdu);
+	
+	// debug pdu
+	if(pdu)
+		return pdebug(pdu, replay);
 
 	// infinite loop on messages
 	while(1) {
