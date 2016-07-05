@@ -39,7 +39,7 @@ int checkok() {
 	int value = 0;
 	
 	// loop while we got a status reply (we can process it later)
-	while((value = parse(readfd(buffer, sizeof(buffer), 0, 0)))) {
+	while((value = parse(readfd(buffer, sizeof(buffer), 0, 0), 0))) {
 		if(value != PARSE_EMPTY && value != PARSE_UNKNOWN)
 			return value;
 	}
@@ -117,7 +117,7 @@ int handler_sms_content(char *buffer) {
 	return 1;
 }
 
-int parse(char *buffer) {
+int parse(char *buffer, int check) {
 	char temp[128];
 	
 	// buffer = strcleaner(buffer);
@@ -191,7 +191,8 @@ int parse(char *buffer) {
 			);
 			
 			// delayed pending
-			pending_check();
+			if(check)
+				pending_check();
 		}
 		
 		// current changed

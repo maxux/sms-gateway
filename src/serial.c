@@ -361,7 +361,7 @@ int main(int argc, char *argv[]) {
 	// infinite loop on messages
 	while(1) {
 		readfd(buffer, sizeof(buffer), 1, check);
-		parse(buffer);
+		parse(buffer, check);
 	}
 	
 	return 0;

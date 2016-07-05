@@ -10,5 +10,5 @@
 	int checkok();
 	int handler_notify(char *buffer);
 	int handler_sms_content(char *buffer);
-	int parse(char *buffer);
+	int parse(char *buffer, int check);
 #endif
