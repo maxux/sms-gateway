@@ -44,6 +44,7 @@ static struct option long_options[] = {
 	{"device", required_argument, 0, 'd'},
 	{"replay", no_argument,       0, 'p'},
 	{"help",   no_argument,       0, 'h'},
+	{"status", no_argument,       0, 's'},
 	{0, 0, 0, 0}
 };
 
@@ -236,12 +237,13 @@ void print_usage(char *app) {
 	printf(" --raw <pdu-raw-id>   only decode pdu raw-id from database\n");
 	printf(" --replay             replay database save when used with --raw\n");
 	printf(" --device <device>    serial device path\n");
+	printf(" --status             enable data link status\n");
 	printf(" --help               print this message\n");
 	
 	exit(EXIT_FAILURE);
 }
 
-void init(char *device, int debug) {
+void init(char *device, int debug, int status) {
 	__device.name = device;
 	
 	printf("[+] init: opening database %s\n", SQL_DATABASE_FILE);
@@ -264,8 +266,10 @@ void init(char *device, int debug) {
 	if(!at_echo(0))
 		dier("init: cannot disable echo");
 	
-	if(!at_curc(0))
-		dier("init: cannot disable current status");
+	if(!status) {
+		if(!at_curc(0))
+			dier("init: cannot disable current status");
+	}
 	
 	//
 	// AT+CPIN
@@ -299,11 +303,11 @@ void init(char *device, int debug) {
 int main(int argc, char *argv[]) {
 	char buffer[2048];
 	char *device = DEFAULT_DEVICE;
-	int pdu = 0, replay = 0;
+	int pdu = 0, replay = 0, status = 0;
 	int i, option_index = 0;
 
 	while(1) {
-		i = getopt_long(argc, argv, "r:d:ph", long_options, &option_index);
+		i = getopt_long(argc, argv, "r:d:phs", long_options, &option_index);
 
 		if(i == -1)
 			break;
@@ -321,6 +325,10 @@ int main(int argc, char *argv[]) {
 				replay = 1;
 				break;
 			
+			case 's':
+				status = 1;
+				break;
+			
 			case 'h':
 			case '?':
 				print_usage(argv[0]);
@@ -332,7 +340,7 @@ int main(int argc, char *argv[]) {
 		}
 	}
 	
-	init(device, pdu);
+	init(device, pdu, status);
 	
 	// debug pdu
 	if(pdu)
