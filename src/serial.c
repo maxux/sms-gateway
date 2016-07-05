@@ -242,7 +242,7 @@ void print_usage(char *app) {
 	printf(" --replay             replay database save when used with --raw\n");
 	printf(" --device <device>    serial device path\n");
 	printf(" --status             enable data link status\n");
-	printf(" --monitoring         disable sms sender, monitor link status\n");
+	printf(" --monitor            disable sms sender, monitor link status\n");
 	printf(" --help               print this message\n");
 	
 	exit(EXIT_FAILURE);
@@ -332,10 +332,12 @@ int main(int argc, char *argv[]) {
 				break;
 			
 			case 's':
+				printf("[+] status enabled\n");
 				status = 1;
 				break;
 			
 			case 'm':
+				printf("[+] monitoring mode\n");
 				check = 0;
 				break;
 			
