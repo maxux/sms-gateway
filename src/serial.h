@@ -16,7 +16,7 @@
 	void diep(char *str);
 	void dier(char *str);
 	
-	char *readfd(char *buffer, size_t length, int timeout);
+	char *readfd(char *buffer, size_t length, int timeout, int check);
 	int writefdraw(char *message);
 	int writefd(char *message);
 #endif
