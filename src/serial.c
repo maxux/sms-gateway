@@ -40,11 +40,12 @@
 #include "pending.h"
 
 static struct option long_options[] = {
-	{"raw",    required_argument, 0, 'r'},
-	{"device", required_argument, 0, 'd'},
-	{"replay", no_argument,       0, 'p'},
-	{"help",   no_argument,       0, 'h'},
-	{"status", no_argument,       0, 's'},
+	{"raw",     required_argument, 0, 'r'},
+	{"device",  required_argument, 0, 'd'},
+	{"replay",  no_argument,       0, 'p'},
+	{"help",    no_argument,       0, 'h'},
+	{"status",  no_argument,       0, 's'},
+	{"monitor", no_argument,       0, 'm'},
 	{0, 0, 0, 0}
 };
 
@@ -111,7 +112,7 @@ int set_interface_attribs(int fd, int speed) {
 //
 // device i/o
 //
-char *readfd(char *buffer, size_t length, int timeout) {
+char *readfd(char *buffer, size_t length, int timeout, int check) {
 	int res, saved = 0;
 	fd_set readfs;
 	int selval;
@@ -154,8 +155,11 @@ char *readfd(char *buffer, size_t length, int timeout) {
 			printf("[+] >> %s\n", buffer);
 			
 		} else {
-			pending_check();
-			unread_check();
+			if(check) {
+				pending_check();
+				unread_check();
+			}
+
 			continue;
 		}
 		
@@ -238,6 +242,7 @@ void print_usage(char *app) {
 	printf(" --replay             replay database save when used with --raw\n");
 	printf(" --device <device>    serial device path\n");
 	printf(" --status             enable data link status\n");
+	printf(" --monitoring         disable sms sender, monitor link status\n");
 	printf(" --help               print this message\n");
 	
 	exit(EXIT_FAILURE);
@@ -304,10 +309,11 @@ int main(int argc, char *argv[]) {
 	char buffer[2048];
 	char *device = DEFAULT_DEVICE;
 	int pdu = 0, replay = 0, status = 0;
+	int check = 1;
 	int i, option_index = 0;
 
 	while(1) {
-		i = getopt_long(argc, argv, "r:d:phs", long_options, &option_index);
+		i = getopt_long(argc, argv, "r:d:phsm", long_options, &option_index);
 
 		if(i == -1)
 			break;
@@ -329,6 +335,10 @@ int main(int argc, char *argv[]) {
 				status = 1;
 				break;
 			
+			case 'm':
+				check = 0;
+				break;
+			
 			case 'h':
 			case '?':
 				print_usage(argv[0]);
@@ -348,7 +358,7 @@ int main(int argc, char *argv[]) {
 
 	// infinite loop on messages
 	while(1) {
-		readfd(buffer, sizeof(buffer), 1);
+		readfd(buffer, sizeof(buffer), 1, check);
 		parse(buffer);
 	}
 	
