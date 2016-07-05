@@ -39,7 +39,7 @@ int checkok() {
 	int value = 0;
 	
 	// loop while we got a status reply (we can process it later)
-	while((value = parse(readfd(buffer, sizeof(buffer), 0)))) {
+	while((value = parse(readfd(buffer, sizeof(buffer), 0, 0)))) {
 		if(value != PARSE_EMPTY && value != PARSE_UNKNOWN)
 			return value;
 	}
@@ -68,7 +68,7 @@ int handler_inbox(char *buffer) {
 	(void) buffer;
 	
 	// read pdu, but ignore it and request to read the message
-	readfd(newread, sizeof(newread), 0);
+	readfd(newread, sizeof(newread), 0, 1);
 	pdu = strcleaner(strdup(newread));
 	
 	printf("[+] saving raw pdu\n");
@@ -92,7 +92,7 @@ int handler_sms_content(char *buffer) {
 
 	// grab message
 	// FIXME
-	readfd(newread, sizeof(newread), 0);
+	readfd(newread, sizeof(newread), 0, 1);
 	pdu = strcleaner(strdup(newread));
 	
 	printf("[+] saving raw pdu\n");
