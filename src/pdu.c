@@ -216,48 +216,53 @@ void pdu_type_debug(char type) {
 
 pdu_t *pdu_decode(const unsigned char *buffer, int buffer_length, pdu_t *message) {
 	dump((unsigned char *) buffer, buffer_length);
-	
+
 	//
 	// pdu header
 	//
 	printf("[+] pdu: smsc length: 0x%02x\n", buffer[0]);
 	printf("[+] pdu: smsc type  : 0x%02x\n", buffer[1]);
 	const int sms_deliver_start = 1 + buffer[0];
-	
+
 	//
 	// sms-deliver
 	//
 	if(sms_deliver_start + 1 > buffer_length)
 		return NULL;
-	
+
 	printf("[+] pdu: sms-deliver: 0x%02x\n", buffer[sms_deliver_start]);
 	pdu_type_debug(buffer[sms_deliver_start]);
-	
+
 	if(!(buffer[sms_deliver_start] & PDU_MMS))
 		printf("[+] pdu: warning    : more message are waiting !\n");
-	
+
 	//
 	// sender header
 	//
 	const int sender_number_length = buffer[sms_deliver_start + 1];
 	message->number = malloc(sizeof(char) * sender_number_length);
-	
+
 	printf("[+] pdu: src length : 0x%02x\n", buffer[sms_deliver_start + 1]);
 	printf("[+] pdu: src type   : 0x%02x\n", buffer[sms_deliver_start + 2]);
-	
+
 	DecodePhoneNumber(buffer + sms_deliver_start + 3, sender_number_length, message->number);
 
 	const int sms_pid_start = sms_deliver_start + 3 + (buffer[sms_deliver_start + 1] + 1) / 2;
-	
+
 	message->charset = buffer[sms_pid_start + 1];
 	printf("[+] pdu: protocol id: 0x%02x\n", buffer[sms_pid_start]);
 	printf("[+] pdu: data coding: 0x%02x", message->charset);
-	
+
 	if(message->charset == 0x00)
 		printf(" -> Default alphabet\n");
-	
-	if(message->charset == 0x08)
+
+	else if(message->charset == 0x08)
 		printf(" -> UCS-2\n");
+
+	else if(message->charset == 0x19)
+		printf(" -> Unicode\n");
+
+	else printf(" -> unknown\n");
 
 	//
 	// timestamp
@@ -328,7 +333,12 @@ pdu_t *pdu_decode(const unsigned char *buffer, int buffer_length, pdu_t *message
 		printf("[+] copying ucs-2 pdu message (%d bytes)\n", buffer_length - (sms_start + 1));
 		memcpy(message->message, buffer + sms_start + 1, buffer_length - (sms_start + 1));
 		decoded_sms_text_size = buffer_length - (sms_start + 1);
-		
+
+	} else if(message->charset == 0x19) {
+		printf("[+] copying unicode message (%d bytes)\n", buffer_length - (sms_start + 1));
+		memcpy(message->message, buffer + sms_start + 1, buffer_length - (sms_start + 1));
+		decoded_sms_text_size = buffer_length - (sms_start + 1);
+
 	} else {
 		printf("[-] charset 0x%02x unsupported\n", message->charset);
 		return NULL;
@@ -613,7 +623,14 @@ pdu_t *pdu_receive(char *data) {
 		
 		memset(readable, '\0', sizeof(readable)); // reset previous messages
 		charlen = convert(output->message, output->message_size, readable, sizeof(readable), "UCS2", "UTF-8");
-		
+
+	} else if(output->charset == 0x19) {
+		printf("[+] converting unicode message\n");
+		dump((unsigned char *) output->message, output->message_size);
+
+		memset(readable, '\0', sizeof(readable)); // reset previous messages
+		charlen = convert(output->message, output->message_size, readable, sizeof(readable), "UNICODE", "UTF-8");
+
 	} else {
 		// should not happen, unsupported detected during pdu_decode
 	}
